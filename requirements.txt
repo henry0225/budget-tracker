@@ -1,0 +1,4 @@
+nicegui>=2.0
+pandas>=2.0
+plotly>=5.15
+requests>=2.28
