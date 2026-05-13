@@ -27,16 +27,44 @@ _STATE_ALT = "|".join(sorted(_STATE_CODES, key=len, reverse=True))
 # Payment-processor / platform prefixes to strip (Robinhood + Capital One)
 _NOISE_PREFIX_RE = re.compile(
     r"^(?:"
-    # Square, Toast, Shopify, SumUp — common small-business POS systems
-    r"SQ\s*\*|TST\*?|SP\s*\*|SUMUP\s*\*|"
-    # PayPal, Stripe, Digital River — general payment processors
-    r"PAYPAL\s*\*?|STRIPE\s*\*|DRI\*?|"
-    # Misc POS / platform prefixes seen in the wild
-    r"PY\s*\*|UEP\*?|SNACK\*?|PAR\*?|EB\s*\*|CPI\*?|CTLP\*?|FUNNEL\*?|"
-    # Major merchants that embed their own prefix in descriptions
-    r"AMAZON\s+(?:MKTPL|RETA)\*?|AMZN\*?|LYFT\s*\*|UBER\s*\*|OPENAI\s*\*|"
-    # Chinese mobile payment platforms (AliPay, WeChat Pay)
-    r"WEIXIN\*?|ALP\*?"
+    # ── US point-of-sale terminals ────────────────────────────────────────
+    # Square, Toast, Shopify Payments, Clover (Fiserv), WePay, Intuit GoPayment
+    r"SQ\s*\*|TST\*?|SP\s*\*|CLOVER\s*\*|WPY\s*\*|INT\s*\*|"
+    # iZettle / Zettle by PayPal, SumUp
+    r"IZ\s*\*|ZETTLE[_\s]*\*?|IZETTLE\s*\*?|SUMUP\s*\*|"
+    # Restaurant-specific ordering / reservation platforms
+    r"OLO\s*\*|RESY\s*\*|TOCK\s*\*|"
+    # ── Subscription & SaaS billing platforms ─────────────────────────────
+    # PayPal (as gateway), Stripe, Braintree, Digital River
+    r"PAYPAL\s*\*?|STRIPE\s*\*|BRAINTREE\s*\*|DRI\s*\*?|"
+    # Paddle / Paddle.net, FastSpring (indie software common)
+    r"PADDLE(?:\.NET)?\s*\*|FASTSPRING\s*\*|"
+    # Patreon, Substack, Recurly
+    r"PATREON\s*\*|SUBSTACK\s*\*|RECURLY\s*\*|"
+    # ── Major platform sub-brand prefixes ─────────────────────────────────
+    # Amazon marketplace / retail, Google (Play / Workspace), Microsoft
+    r"AMAZON\s+(?:MKTPL|RETA)\s*\*?|AMZN\s*\*?|"
+    r"GOOGLE\s*\*|GOOG\s*\*|MSFT\s*\*|"
+    # Lyft, Uber, OpenAI
+    r"LYFT\s*\*|UBER\s*\*|OPENAI\s*\*|"
+    # ── Events & ticketing ────────────────────────────────────────────────
+    # Eventbrite, Etix, AXS, Ticketmaster (TMCO / TKTMSTR), DICE
+    r"EB\s*\*|ETIX\s*\*|AXS\s*\*|AXSED\s*\*|TMCO\s*\*|TKTMSTR\s*\*|DICE\s*\*|"
+    # ── Marketplace / e-commerce gateways ─────────────────────────────────
+    # Etsy (seller-side billing), Shopify (long form), WooPayments
+    r"ETSY\s*\*|SHOPIFY\s*\*|WOO\s*\*|"
+    # ── Payment infrastructure ────────────────────────────────────────────
+    # Checkout.com, Adyen, Worldpay, Heartland, Shift4, Elavon
+    r"CKO\s*\*|ADYEN\s*\*|WORLDPAY\s*\*|HEARTLAND\s*\*|SHIFT4\s*\*|ELAVON\s*\*|"
+    # Flywire and TouchNet (university / education payments)
+    r"FLYWIRE\s*\*|TOUCHNET\s*\*|"
+    # ── Miscellaneous / legacy prefixes ───────────────────────────────────
+    r"FUNNEL\s*\*?|PY\s*\*|UEP\s*\*?|SNACK\s*\*?|PAR\s*\*?|CPI\s*\*?|CTLP\s*\*?|"
+    # ── International mobile payment platforms ────────────────────────────
+    # WeChat Pay and AliPay (China)
+    r"WEIXIN\s*\*?|ALP\s*\*?|"
+    # GrabPay (SE Asia), Razorpay (India), PayMe/HSBC (HK), Kakao Pay (Korea)
+    r"GRABPAY\s*\*|RAZORPAY\s*\*|PAYME\s*\*|KAKAOPAY\s*\*"
     r")\s*",
     re.IGNORECASE,
 )
