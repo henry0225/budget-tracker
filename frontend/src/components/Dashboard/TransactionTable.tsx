@@ -1,11 +1,14 @@
 import { useMemo, useState } from 'react'
-import { Search } from 'lucide-react'
+import { ChevronDown, ChevronUp, ChevronsUpDown, Search } from 'lucide-react'
 import clsx from 'clsx'
 import { catColor } from '../../constants'
 import { fmtCurrency } from '../../lib/format'
 import type { Transaction } from '../../types'
 
 const PAGE_SIZE = 25
+
+type SortCol = 'date' | 'merchant' | 'amount' | 'category'
+type SortDir = 'asc' | 'desc'
 
 interface Props {
   transactions: Transaction[]
@@ -15,11 +18,21 @@ export function TransactionTable({ transactions }: Props) {
   const [query, setQuery] = useState('')
   const [activeCats, setActiveCats] = useState<Set<string>>(new Set())
   const [page, setPage] = useState(1)
+  const [sortCol, setSortCol] = useState<SortCol>('date')
+  const [sortDir, setSortDir] = useState<SortDir>('desc')
 
   const categories = useMemo(
     () => [...new Set(transactions.map((t) => t.category!))].sort(),
     [transactions],
   )
+
+  const categoryCounts = useMemo(() => {
+    const counts: Record<string, number> = {}
+    transactions.forEach((t) => {
+      counts[t.category!] = (counts[t.category!] ?? 0) + 1
+    })
+    return counts
+  }, [transactions])
 
   const filtered = useMemo(() => {
     const q = query.toLowerCase()
@@ -31,9 +44,30 @@ export function TransactionTable({ transactions }: Props) {
     })
   }, [transactions, query, activeCats])
 
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
-  const pageItems = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
+  const sorted = useMemo(() => {
+    return [...filtered].sort((a, b) => {
+      let cmp = 0
+      if (sortCol === 'date') cmp = a.date.localeCompare(b.date)
+      else if (sortCol === 'merchant') cmp = a.merchant.localeCompare(b.merchant)
+      else if (sortCol === 'amount') cmp = a.amount - b.amount
+      else if (sortCol === 'category') cmp = (a.category ?? '').localeCompare(b.category ?? '')
+      return sortDir === 'asc' ? cmp : -cmp
+    })
+  }, [filtered, sortCol, sortDir])
+
+  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE))
+  const pageItems = sorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
   const filteredTotal = filtered.reduce((s, t) => s + t.amount, 0)
+
+  function toggleSort(col: SortCol) {
+    if (sortCol === col) {
+      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'))
+    } else {
+      setSortCol(col)
+      setSortDir(col === 'amount' ? 'desc' : 'asc')
+    }
+    setPage(1)
+  }
 
   function toggleCat(cat: string) {
     setActiveCats((prev) => {
@@ -49,6 +83,14 @@ export function TransactionTable({ transactions }: Props) {
     setQuery(value)
     setPage(1)
   }
+
+  const columns: { label: string; col?: SortCol; right?: boolean }[] = [
+    { label: 'Date', col: 'date' },
+    { label: 'Merchant', col: 'merchant' },
+    { label: 'Description' },
+    { label: 'Category', col: 'category' },
+    { label: 'Amount', col: 'amount', right: true },
+  ]
 
   return (
     <div className="space-y-3">
@@ -81,6 +123,9 @@ export function TransactionTable({ transactions }: Props) {
                 style={{ background: catColor(cat) }}
               />
               {cat}
+              <span className={clsx('tabular-nums', activeCats.has(cat) ? 'text-zinc-400' : 'text-zinc-600')}>
+                {categoryCounts[cat]}
+              </span>
             </button>
           ))}
         </div>
@@ -92,14 +137,24 @@ export function TransactionTable({ transactions }: Props) {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-zinc-800 bg-zinc-900">
-                {['Date', 'Merchant', 'Description', 'Category', 'Amount'].map((h) => (
+                {columns.map(({ label, col, right }) => (
                   <th
-                    key={h}
-                    className={`px-4 py-3 text-[11px] font-medium uppercase tracking-wider text-zinc-500 ${
-                      h === 'Amount' ? 'text-right' : 'text-left'
-                    }`}
+                    key={label}
+                    onClick={col ? () => toggleSort(col) : undefined}
+                    className={clsx(
+                      'px-4 py-3 text-[11px] font-medium uppercase tracking-wider text-zinc-500',
+                      right ? 'text-right' : 'text-left',
+                      col && 'cursor-pointer select-none hover:text-zinc-300 transition-colors',
+                    )}
                   >
-                    {h}
+                    {label}
+                    {col && (
+                      sortCol === col
+                        ? (sortDir === 'asc'
+                          ? <ChevronUp className="ml-1 inline-block h-3 w-3" />
+                          : <ChevronDown className="ml-1 inline-block h-3 w-3" />)
+                        : <ChevronsUpDown className="ml-1 inline-block h-3 w-3 opacity-30" />
+                    )}
                   </th>
                 ))}
               </tr>

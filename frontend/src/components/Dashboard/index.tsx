@@ -1,7 +1,8 @@
 import { useState } from 'react'
+import { Download } from 'lucide-react'
 import { catColor } from '../../constants'
 import { fmtDollar } from '../../lib/format'
-import type { DashboardData } from '../../types'
+import type { DashboardData, Transaction } from '../../types'
 import { Charts } from './Charts'
 import { Insights } from './Insights'
 import { TransactionTable } from './TransactionTable'
@@ -26,6 +27,25 @@ function MetricCard({
       </p>
     </div>
   )
+}
+
+function exportCSV(transactions: Transaction[]) {
+  const headers = ['Date', 'Merchant', 'Description', 'Amount', 'Category']
+  const rows = transactions.map((t) => [
+    t.date,
+    `"${(t.merchant ?? '').replace(/"/g, '""')}"`,
+    `"${(t.description ?? '').replace(/"/g, '""')}"`,
+    t.amount.toFixed(2),
+    t.category ?? '',
+  ])
+  const csv = [headers.join(','), ...rows.map((r) => r.join(','))].join('\n')
+  const blob = new Blob([csv], { type: 'text/csv' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = 'transactions.csv'
+  a.click()
+  URL.revokeObjectURL(url)
 }
 
 type Tab = 'transactions' | 'insights'
@@ -57,20 +77,29 @@ export function Dashboard({ data }: Props) {
 
       {/* Tabs */}
       <div>
-        <div className="flex border-b border-zinc-800">
-          {(['transactions', 'insights'] as Tab[]).map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium capitalize transition-colors ${
-                tab === t
-                  ? 'border-indigo-500 text-zinc-50'
-                  : 'border-transparent text-zinc-500 hover:text-zinc-300'
-              }`}
-            >
-              {t}
-            </button>
-          ))}
+        <div className="flex items-center justify-between border-b border-zinc-800">
+          <div className="flex">
+            {(['transactions', 'insights'] as Tab[]).map((t) => (
+              <button
+                key={t}
+                onClick={() => setTab(t)}
+                className={`-mb-px border-b-2 px-4 py-2.5 text-sm font-medium capitalize transition-colors ${
+                  tab === t
+                    ? 'border-indigo-500 text-zinc-50'
+                    : 'border-transparent text-zinc-500 hover:text-zinc-300'
+                }`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+          <button
+            onClick={() => exportCSV(transactions)}
+            className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs text-zinc-500 transition-colors hover:text-zinc-300"
+          >
+            <Download className="h-3.5 w-3.5" />
+            Export CSV
+          </button>
         </div>
         <div className="mt-5">
           {tab === 'transactions' ? (

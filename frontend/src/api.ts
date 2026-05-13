@@ -51,6 +51,19 @@ export function streamCategorize(
   return es
 }
 
+export async function mergeCSVs(sessionIds: string[]): Promise<UploadResponse> {
+  const res = await fetch('/api/merge', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ session_ids: sessionIds }),
+  })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({})) as { detail?: string }
+    throw new Error(err.detail ?? `Merge failed (${res.status})`)
+  }
+  return res.json() as Promise<UploadResponse>
+}
+
 export async function getDashboard(sessionId: string): Promise<DashboardData> {
   const res = await fetch(`/api/dashboard/${encodeURIComponent(sessionId)}`)
   if (!res.ok) {

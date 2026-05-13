@@ -5,7 +5,7 @@ import calendar
 import io
 import json
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import AsyncGenerator
 
@@ -35,7 +35,7 @@ _sessions: dict[str, dict] = {}
 
 
 def _evict_old_sessions() -> None:
-    cutoff = datetime.utcnow() - timedelta(hours=2)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
     stale = [k for k, v in _sessions.items() if v["created_at"] < cutoff]
     for k in stale:
         del _sessions[k]
@@ -50,15 +50,6 @@ def _require_session(session_id: str) -> dict:
 
 
 # ── Shared helpers ─────────────────────────────────────────────────────────────
-
-def _fmt(v: float) -> str:
-    av = abs(v)
-    if av >= 1_000_000:
-        return f"${v / 1_000_000:.1f}M"
-    if av >= 1_000:
-        return f"${v / 1_000:.0f}k"
-    return f"${v:,.0f}"
-
 
 def _df_to_transactions(df: pd.DataFrame, *, include_category: bool = False) -> list[dict]:
     cols = ["Date", "Merchant", "Description", "Amount"]
@@ -83,12 +74,7 @@ def _compute_dashboard(df: pd.DataFrame) -> dict:
 
     # Wide-format monthly series: [{month, "Cat A": n, "Cat B": n, ...}]
     monthly_wide = (
-        df.assign(
-            month=lambda d: pd.to_datetime(d["Date"])
-            .dt.to_period("M")
-            .dt.to_timestamp()
-            .dt.strftime("%Y-%m")
-        )
+        df.assign(month=lambda d: pd.to_datetime(d["Date"]).dt.strftime("%Y-%m"))
         .groupby(["month", "Category"])["Amount"]
         .sum()
         .unstack(fill_value=0)
@@ -129,7 +115,6 @@ def _compute_insights(df: pd.DataFrame, cat_series: pd.Series, total: float) -> 
     cards.append({
         "type": "top_category",
         "title": "Spending breakdown",
-        "body": f"{top_cat} leads at {top_amt / total * 100:.0f}% of total spending",
         "data": {"category": top_cat, "amount": top_amt, "pct": top_amt / total * 100, "all_cats": all_cats},
     })
 
@@ -146,7 +131,6 @@ def _compute_insights(df: pd.DataFrame, cat_series: pd.Series, total: float) -> 
     cards.append({
         "type": "day_of_week",
         "title": "Spending by day",
-        "body": f"You spend the most on {dow_names[peak_dow]}s",
         "data": {
             "days": [
                 {"day": dow_names[i], "amount": float(row["sum"]), "count": int(row["count"])}
@@ -161,7 +145,6 @@ def _compute_insights(df: pd.DataFrame, cat_series: pd.Series, total: float) -> 
     cards.append({
         "type": "largest_purchase",
         "title": "Largest purchase",
-        "body": f"{largest['Merchant']} — {_fmt(float(largest['Amount']))} on {pd.to_datetime(largest['Date']).strftime('%b %d, %Y')}",
         "data": {
             "merchant": str(largest["Merchant"]),
             "amount": float(largest["Amount"]),
@@ -172,7 +155,7 @@ def _compute_insights(df: pd.DataFrame, cat_series: pd.Series, total: float) -> 
 
     # 4. Month-over-month comparison
     monthly_totals = (
-        df.assign(m=lambda d: pd.to_datetime(d["Date"]).dt.to_period("M"))
+        df.assign(m=lambda d: pd.to_datetime(d["Date"]).dt.strftime("%Y-%m"))
         .groupby("m")["Amount"]
         .sum()
         .sort_index()
@@ -185,7 +168,6 @@ def _compute_insights(df: pd.DataFrame, cat_series: pd.Series, total: float) -> 
         cards.append({
             "type": f"mom_{direction}",
             "title": "Month-over-month",
-            "body": f"{'↑' if pct > 0 else '↓'} {abs(pct):.0f}% vs prior month",
             "data": {
                 "curr_month": _fmt_period(cm),
                 "curr_amount": curr,
@@ -217,7 +199,6 @@ def _compute_insights(df: pd.DataFrame, cat_series: pd.Series, total: float) -> 
         cards.append({
             "type": "recurring",
             "title": "Recurring charges",
-            "body": f"{len(items)} recurring merchants · {_fmt(grand_total)} total",
             "data": {"items": items, "grand_total": grand_total},
         })
 
@@ -245,7 +226,7 @@ async def upload(file: UploadFile = File(...)) -> dict:
     _sessions[session_id] = {
         "prepared": prepared,
         "categorized": None,
-        "created_at": datetime.utcnow(),
+        "created_at": datetime.now(timezone.utc),
     }
 
     return {
@@ -253,6 +234,35 @@ async def upload(file: UploadFile = File(...)) -> dict:
         "transaction_count": len(prepared),
         "merchant_count": int(prepared["Merchant"].nunique()),
         "preview": _df_to_transactions(prepared.head(12)),
+    }
+
+
+@app.post("/api/merge")
+async def merge_sessions(body: dict) -> dict:
+    session_ids: list[str] = body.get("session_ids", [])
+    if not session_ids:
+        raise HTTPException(400, "No session IDs provided")
+
+    dfs: list[pd.DataFrame] = []
+    for sid in session_ids:
+        session = _require_session(sid)
+        dfs.append(session["prepared"])
+
+    combined = dfs[0].copy() if len(dfs) == 1 else pd.concat(dfs, ignore_index=True)
+    combined = combined.sort_values("Date", ascending=False).reset_index(drop=True)
+
+    merged_id = str(uuid.uuid4())
+    _sessions[merged_id] = {
+        "prepared": combined,
+        "categorized": None,
+        "created_at": datetime.now(timezone.utc),
+    }
+
+    return {
+        "session_id": merged_id,
+        "transaction_count": len(combined),
+        "merchant_count": int(combined["Merchant"].nunique()),
+        "preview": _df_to_transactions(combined.head(12)),
     }
 
 

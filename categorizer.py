@@ -223,6 +223,13 @@ def _categorize_batch(
             results[key] = "Uncategorized"
         return results
 
+    if response.status_code == 401:
+        raise ValueError("Invalid DeepSeek API key — check your key at platform.deepseek.com")
+    if response.status_code == 402:
+        raise ValueError("Insufficient DeepSeek credits — please top up at platform.deepseek.com")
+    if response.status_code >= 400:
+        raise ValueError(f"DeepSeek API error ({response.status_code})")
+
     try:
         body = response.json()
         content = body["choices"][0]["message"]["content"]

@@ -1,14 +1,17 @@
 import { useCallback, useRef, useState } from 'react'
-import { Eye, EyeOff, RotateCcw, Sparkles, Upload } from 'lucide-react'
+import { Eye, EyeOff, RotateCcw, Sparkles, Upload, X } from 'lucide-react'
 import clsx from 'clsx'
+import type { UploadedFile } from '../types'
 
 interface SidebarProps {
-  hasData: boolean
+  uploadedFiles: UploadedFile[]
+  hasDashboard: boolean
   apiKey: string
   onApiKeyChange: (key: string) => void
   onUpload: (file: File) => void
   onCategorize: () => void
   onReset: () => void
+  onRemoveFile: (sessionId: string) => void
   canCategorize: boolean
   isCategorizing: boolean
   progress: { done: number; total: number } | null
@@ -16,12 +19,14 @@ interface SidebarProps {
 }
 
 export function Sidebar({
-  hasData,
+  uploadedFiles,
+  hasDashboard,
   apiKey,
   onApiKeyChange,
   onUpload,
   onCategorize,
   onReset,
+  onRemoveFile,
   canCategorize,
   isCategorizing,
   progress,
@@ -99,13 +104,38 @@ export function Sidebar({
             />
           </div>
           <p className="mt-2 text-[10px] text-zinc-700">Robinhood · Capital One</p>
-          {hasData && (
+
+          {/* Uploaded file list */}
+          {uploadedFiles.length > 0 && (
+            <div className="mt-2 space-y-1">
+              {uploadedFiles.map((f) => (
+                <div
+                  key={f.sessionId}
+                  className="flex items-center gap-2 rounded-md bg-zinc-800/60 px-2.5 py-1.5"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-xs text-zinc-300">{f.name}</p>
+                    <p className="text-[10px] text-zinc-600">{f.count.toLocaleString()} txns</p>
+                  </div>
+                  <button
+                    onClick={() => onRemoveFile(f.sessionId)}
+                    className="shrink-0 text-zinc-600 transition-colors hover:text-zinc-400"
+                    aria-label={`Remove ${f.name}`}
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {hasDashboard && (
             <button
               onClick={onReset}
-              className="mt-1 flex items-center gap-1 text-[11px] text-zinc-600 transition-colors hover:text-zinc-400"
+              className="mt-2 flex items-center gap-1 text-[11px] text-zinc-600 transition-colors hover:text-zinc-400"
             >
               <RotateCcw className="h-3 w-3" />
-              Upload new file
+              Start over
             </button>
           )}
         </div>
@@ -142,7 +172,7 @@ export function Sidebar({
           className="flex items-center justify-center gap-2 rounded-lg bg-indigo-500 px-4 py-2.5 text-sm font-medium text-white transition-colors hover:bg-indigo-400 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Sparkles className="h-4 w-4" />
-          {isCategorizing ? 'Categorizing…' : 'Categorize'}
+          {isCategorizing ? 'Categorizing…' : hasDashboard ? 'Re-categorize' : 'Categorize'}
         </button>
 
         {/* Progress */}

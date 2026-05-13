@@ -6,7 +6,6 @@ Supports Robinhood and Capital One formats.
 from __future__ import annotations
 
 import re
-from typing import Any
 
 import pandas as pd
 
@@ -104,7 +103,7 @@ def _detect_format(df: pd.DataFrame) -> str:
 # Public API
 # ---------------------------------------------------------------------------
 
-def parse_csv(source: str | Any) -> pd.DataFrame:
+def parse_csv(source) -> pd.DataFrame:
     """Read a credit card CSV export and return a normalized DataFrame.
 
     Auto-detects Robinhood and Capital One formats. The returned DataFrame
@@ -135,40 +134,6 @@ def prepare_transactions(df: pd.DataFrame) -> pd.DataFrame:
     ]
     out = out.sort_values("Date", ascending=False).reset_index(drop=True)
     return out[["Date", "Time", "Amount", "Merchant", "Description", "Month", "ParsedDescription"]]
-
-
-def get_summary_stats(df: pd.DataFrame) -> dict[str, Any]:
-    """Compute summary statistics from prepared transaction data."""
-    if df.empty:
-        return {
-            "total_spending": 0.0,
-            "transaction_count": 0,
-            "date_range": {"min": None, "max": None},
-            "monthly_totals": {},
-            "top_merchants": [],
-        }
-
-    monthly = df.groupby("Month")["Amount"].sum().round(2).to_dict()
-
-    merchant_agg = (
-        df.groupby("Merchant")
-        .agg(total=("Amount", "sum"), count=("Amount", "count"))
-        .sort_values("total", ascending=False)
-        .head(20)
-        .reset_index()
-    )
-    merchant_agg["total"] = merchant_agg["total"].round(2)
-
-    return {
-        "total_spending": round(df["Amount"].sum(), 2),
-        "transaction_count": len(df),
-        "date_range": {
-            "min": df["Date"].min().strftime("%Y-%m-%d"),
-            "max": df["Date"].max().strftime("%Y-%m-%d"),
-        },
-        "monthly_totals": monthly,
-        "top_merchants": merchant_agg.to_dict("records"),
-    }
 
 
 # ---------------------------------------------------------------------------

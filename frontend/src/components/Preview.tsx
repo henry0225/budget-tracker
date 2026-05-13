@@ -7,6 +7,7 @@ interface Props {
 
 export function Preview({ data }: Props) {
   const remaining = data.transaction_count - data.preview.length
+  const showDescription = data.preview.some((tx) => tx.description !== tx.merchant)
 
   return (
     <div className="p-8">
@@ -20,16 +21,18 @@ export function Preview({ data }: Props) {
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b border-zinc-800 bg-zinc-900">
-              {['Date', 'Merchant', 'Description', 'Amount'].map((h) => (
-                <th
-                  key={h}
-                  className={`px-4 py-3 text-[11px] font-medium uppercase tracking-wider text-zinc-500 ${
-                    h === 'Amount' ? 'text-right' : 'text-left'
-                  }`}
-                >
-                  {h}
-                </th>
-              ))}
+              {['Date', 'Merchant', ...(showDescription ? ['Description'] : []), 'Amount'].map(
+                (h) => (
+                  <th
+                    key={h}
+                    className={`px-4 py-3 text-[11px] font-medium uppercase tracking-wider text-zinc-500 ${
+                      h === 'Amount' ? 'text-right' : 'text-left'
+                    }`}
+                  >
+                    {h}
+                  </th>
+                ),
+              )}
             </tr>
           </thead>
           <tbody>
@@ -40,7 +43,9 @@ export function Preview({ data }: Props) {
               >
                 <td className="px-4 py-3 tabular-nums text-zinc-400">{tx.date}</td>
                 <td className="px-4 py-3 font-medium">{tx.merchant}</td>
-                <td className="max-w-xs truncate px-4 py-3 text-zinc-400">{tx.description}</td>
+                {showDescription && (
+                  <td className="max-w-xs truncate px-4 py-3 text-zinc-400">{tx.description}</td>
+                )}
                 <td className="px-4 py-3 text-right tabular-nums">{fmtCurrency(tx.amount)}</td>
               </tr>
             ))}

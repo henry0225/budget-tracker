@@ -34,7 +34,7 @@ function ChartCard({ title, children }: { title: string; children: React.ReactNo
 }
 
 function SpendingBarChart({ data }: { data: CategoryTotal[] }) {
-  // Sort ascending so the largest bar is at the top of the horizontal chart
+  // Ascending sort puts the largest bar at the bottom; recharts renders bottom → top
   const sorted = [...data].sort((a, b) => a.amount - b.amount)
 
   return (

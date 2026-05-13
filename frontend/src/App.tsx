@@ -1,14 +1,14 @@
 import { useRef, useState } from 'react'
-import { getDashboard, streamCategorize, uploadCSV } from './api'
+import { getDashboard, mergeCSVs, streamCategorize, uploadCSV } from './api'
 import { Sidebar } from './components/Sidebar'
 import { Landing } from './components/Landing'
 import { Preview } from './components/Preview'
 import { Dashboard } from './components/Dashboard'
-import type { AppView, DashboardData, UploadResponse } from './types'
+import type { AppView, DashboardData, UploadResponse, UploadedFile } from './types'
 
 export default function App() {
   const [view, setView] = useState<AppView>('landing')
-  const [sessionId, setSessionId] = useState<string | null>(null)
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([])
   const [previewData, setPreviewData] = useState<UploadResponse | null>(null)
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null)
   const [apiKey, setApiKey] = useState('')
@@ -24,26 +24,55 @@ export default function App() {
     setProgress(null)
     try {
       const data = await uploadCSV(file)
-      setSessionId(data.session_id)
-      setPreviewData(data)
+      const newFiles = [
+        ...uploadedFiles,
+        { name: file.name, sessionId: data.session_id, count: data.transaction_count },
+      ]
+      setUploadedFiles(newFiles)
+
+      if (newFiles.length > 1) {
+        const merged = await mergeCSVs(newFiles.map((f) => f.sessionId))
+        setPreviewData(merged)
+      } else {
+        setPreviewData(data)
+      }
       setView('preview')
     } catch (e) {
       setError((e as Error).message)
     }
   }
 
+  async function handleRemoveFile(sessionId: string) {
+    const remaining = uploadedFiles.filter((f) => f.sessionId !== sessionId)
+    setUploadedFiles(remaining)
+    setDashboardData(null)
+    if (remaining.length === 0) {
+      setPreviewData(null)
+      setView('landing')
+    } else {
+      try {
+        const merged = await mergeCSVs(remaining.map((f) => f.sessionId))
+        setPreviewData(merged)
+        setView('preview')
+      } catch (e) {
+        setError((e as Error).message)
+      }
+    }
+  }
+
   function handleCategorize() {
-    if (!sessionId || !apiKey || isCategorizing) return
+    const activeSessionId = previewData?.session_id
+    if (!activeSessionId || !apiKey || isCategorizing) return
     esRef.current?.close()
     setIsCategorizing(true)
     setProgress(null)
     setError(null)
 
-    esRef.current = streamCategorize(sessionId, apiKey, {
+    esRef.current = streamCategorize(activeSessionId, apiKey, {
       onProgress: (done, total) => setProgress({ done, total }),
       onDone: async () => {
         try {
-          const data = await getDashboard(sessionId!)
+          const data = await getDashboard(activeSessionId)
           setDashboardData(data)
           setView('dashboard')
         } catch (e) {
@@ -63,10 +92,9 @@ export default function App() {
   function handleReset() {
     esRef.current?.close()
     setView('landing')
-    setSessionId(null)
+    setUploadedFiles([])
     setPreviewData(null)
     setDashboardData(null)
-    setApiKey('')
     setProgress(null)
     setIsCategorizing(false)
     setError(null)
@@ -75,13 +103,15 @@ export default function App() {
   return (
     <div className="flex h-screen overflow-hidden bg-zinc-950 text-zinc-50">
       <Sidebar
-        hasData={view !== 'landing'}
+        uploadedFiles={uploadedFiles}
+        hasDashboard={view === 'dashboard'}
         apiKey={apiKey}
         onApiKeyChange={setApiKey}
         onUpload={handleUpload}
         onCategorize={handleCategorize}
         onReset={handleReset}
-        canCategorize={view !== 'landing' && !!apiKey && !isCategorizing}
+        onRemoveFile={handleRemoveFile}
+        canCategorize={uploadedFiles.length > 0 && !!apiKey && !isCategorizing}
         isCategorizing={isCategorizing}
         progress={progress}
         error={error}

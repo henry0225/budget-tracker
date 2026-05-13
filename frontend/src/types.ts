@@ -33,8 +33,13 @@ export interface Metrics {
 export interface InsightItem {
   type: string
   title: string
-  body: string
   data?: Record<string, unknown>
+}
+
+export interface UploadedFile {
+  name: string
+  sessionId: string
+  count: number
 }
 
 export interface DashboardData {
