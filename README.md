@@ -1,32 +1,45 @@
 # Budget Tracker
 
-A dark-themed web dashboard for Robinhood credit card CSV analysis.  
-Uses DeepSeek AI to categorize every transaction. Built with NiceGUI.
+AI-powered spending dashboard for credit card CSVs.  
+Supports **Robinhood** and **Capital One** exports.  
+Uses DeepSeek to categorize every transaction.
 
 ## Quick Start
 
 ```bash
+# Backend
 pip install -r requirements.txt
-python app.py
+python main.py          # → http://localhost:8000
+
+# Frontend (dev mode)
+cd frontend
+npm install
+npm run dev             # → http://localhost:5173
 ```
 
-Open **http://localhost:8080** — dark theme, no setup needed.
+The FastAPI server serves the production React build from `frontend/dist/` automatically on `/`.
 
-1. Drop your Robinhood CSV into the upload zone
-2. Enter your [DeepSeek API key](https://platform.deepseek.com/api_keys)
-3. Click **Categorize transactions**
-4. Explore the dashboard
+## Architecture
 
-## Features
+```
+main.py          FastAPI backend (REST + SSE streaming)
+parser.py        CSV parser (auto-detects Robinhood / Capital One)
+categorizer.py   DeepSeek LLM integration with local JSON cache
+app.py           Standalone NiceGUI app (alternative UI)
+frontend/        React 18 + TypeScript + Vite + Tailwind
+```
 
-- **AI categorization** — DeepSeek V4 classifies every merchant into 8 categories
-- **Local cache** — `~/.budget-tracker-cache.json` so you never pay twice for the same merchant
-- **Dashboard** — spending by category, monthly trends, top merchants
-- **Transaction browser** — filter by category, search, sort
-- **Insights** — top category, recurring payments, largest purchase, trends
-- **Dark theme** — minimal, designed for long sessions
+### API Endpoints
 
-## Categories
+| Method | Path | Description |
+|--------|------|-------------|
+| `POST` | `/api/upload` | Upload CSV → session ID + preview |
+| `GET` | `/api/categorize/{session_id}?api_key=…` | SSE stream of categorization progress |
+| `GET` | `/api/dashboard/{session_id}` | Full dashboard data (metrics, charts, insights) |
+
+### Categorization
+
+Transactions are classified into 8 categories by DeepSeek V4 Flash:
 
 | Category | Examples |
 |----------|----------|
@@ -39,9 +52,10 @@ Open **http://localhost:8080** — dark theme, no setup needed.
 | Entertainment | Movies, events, parks |
 | Fees & Charges | Card fees |
 
-## Tech
+Results are cached in `~/.budget-tracker-cache.json` — re-categorization is instant.
 
-- **NiceGUI** — Python web UI (Vue/Quasar components)
-- **DeepSeek V4 Flash** — LLM for categorization
-- **Plotly** — interactive charts
-- **Pandas** — data processing
+## Environment
+
+- Python 3.11+
+- DeepSeek API key (entered in the UI)
+- Node.js 18+ (for frontend dev)
