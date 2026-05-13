@@ -153,21 +153,21 @@ async def _handle_categorize():
         ui.notify("Upload a CSV and enter your API key first", type="warning", position="top")
         return
 
-    progress_label.set_text("Categorizing…")
+    progress_label.set_content('<div class="sidebar-status">Categorizing…</div>')
     progress_bar.props("indeterminate")
     try:
         prepared = prepare_transactions(raw_df)
 
         def on_progress(done: int, total: int):
-            progress_label.set_text(f"{done}/{total} merchants")
+            progress_label.set_content(f'<div class="sidebar-status">{done}/{total} merchants</div>')
             progress_bar.props.remove("indeterminate")
             progress_bar.props(f"value={done/total*100}")
 
         categorized_df = categorize_transactions(prepared, _api_key, on_progress=on_progress)
-        progress_label.set_text(f"Done — {len(categorized_df):,} transactions")
+        progress_label.set_content(f'<div class="sidebar-status">Done — {len(categorized_df):,} transactions</div>')
         _render()
     except Exception as ex:
-        progress_label.set_text(f"Error: {ex}")
+        progress_label.set_content(f'<div class="sidebar-status" style="color:#f87171">Error: {ex}</div>')
         progress_bar.props("value=0 indeterminate=false")
 
 
@@ -394,19 +394,28 @@ def _build():
         .q-header { background: #09090b !important; border-bottom: 1px solid #27272a !important; }
 
         /* ── Drawer ── */
-        .q-drawer { background: #0f0f12 !important; border-right: 1px solid #27272a !important; }
+        .q-drawer { background: #0c0c10 !important; border-right: 1px solid #27272a !important; }
+        .sidebar-label {
+            font-size: .7rem; font-weight: 500; color: #71717a;
+            text-transform: uppercase; letter-spacing: .06em; margin-bottom: .35rem;
+        }
+        .sidebar-hint { font-size: .7rem; color: #52525b; margin-top: .4rem; line-height: 1.4; }
+        .sidebar-status { font-size: .75rem; color: #a1a1aa; line-height: 1.4; }
+        .sidebar-footer { font-size: .7rem; color: #3f3f46; line-height: 1.5; }
         .q-drawer .q-uploader {
             background: #18181b !important; border: 1px dashed #3f3f46 !important;
-            border-radius: 12px !important; box-shadow: none !important;
+            border-radius: 10px !important; box-shadow: none !important;
         }
-        .q-drawer .q-uploader__header { background: transparent !important; color: #a1a1aa !important; }
+        .q-drawer .q-uploader__header { background: transparent !important; color: #a1a1aa !important; font-size: .8rem !important; font-weight: 400 !important; padding: .6rem .85rem !important; }
+        .q-drawer .q-uploader__list { display: none !important; }
         .q-drawer .q-field--outlined .q-field__control {
             background: #18181b !important; border-color: #27272a !important;
             border-radius: 8px !important; box-shadow: none !important;
+            height: 40px !important; min-height: 40px !important;
         }
         .q-drawer .q-field--outlined.q-field--focused .q-field__control { border-color: #818cf8 !important; }
-        .q-drawer .q-field__native, .q-drawer .q-field__label { color: #a1a1aa !important; }
-        .q-drawer .q-field__native { color: #e4e4e7 !important; }
+        .q-drawer .q-field__native { color: #e4e4e7 !important; font-size: .8125rem !important; }
+        .q-drawer .q-field__label { color: #71717a !important; font-size: .8125rem !important; }
 
         /* ── Buttons ── */
         .q-btn { border-radius: 8px !important; font-weight: 500 !important; text-transform: none !important; box-shadow: none !important; }
@@ -492,39 +501,39 @@ def _build():
     # ── Sidebar ──
     global progress_label, progress_bar, main
 
-    with ui.left_drawer(value=True, bordered=False).style("width:300px") as drawer:
-        with ui.column().classes("q-pa-lg gap-4 w-full"):
+    with ui.left_drawer(value=True, bordered=False).style("width:320px;background:#0c0c10") as drawer:
+        with ui.column().classes("q-pa-lg w-full").style("gap:1.25rem"):
+            # Section: upload
+            ui.html('<div class="sidebar-label">Data source</div>')
             ui.upload(
-                label="Drop CSV here",
                 on_upload=_handle_upload,
                 auto_upload=True,
-            ).classes("w-full").props('accept=".csv"')
+            ).classes("w-full").props('accept=".csv" label="Drop CSV here" no-thumbnails flat')
 
+            # Section: API key
+            ui.html('<div class="sidebar-label">DeepSeek API key</div>')
             ui.input(
-                "DeepSeek API key",
+                placeholder="sk-…",
                 password=True,
                 password_toggle_button=True,
                 on_change=_on_api_change,
-            ).classes("w-full")
+            ).classes("w-full").props('outlined dense bg-color="#18181b" hide-bottom-space')
+            ui.html('<div class="sidebar-hint">Get a key at platform.deepseek.com</div>')
 
+            # Section: action
             ui.button(
-                "Categorize transactions",
+                "Categorize",
                 on_click=_handle_categorize,
                 icon="auto_awesome",
             ).classes("w-full")
 
-            ui.separator()
-
-            progress_label = ui.label("").classes("text-caption")
-            progress_label.style("color:#71717a")
-            progress_bar = ui.linear_progress(value=0).classes("w-full q-mt-xs")
+            # Section: status
+            ui.html('<div style="height:1px;background:#27272a;margin:.25rem 0"></div>')
+            progress_label = ui.html('<div class="sidebar-status"></div>')
+            progress_bar = ui.linear_progress(value=0, size="4px").classes("w-full")
 
             ui.space()
-            ui.html("""
-                <div style="font-size:.75rem;color:#52525b;line-height:1.6">
-                    DeepSeek V4 · NiceGUI · Plotly
-                </div>
-            """)
+            ui.html('<div class="sidebar-footer">DeepSeek V4 · NiceGUI · Plotly</div>')
 
     # ── Main content ──
     with ui.element("div").classes("q-pa-xl").style("width:100%;max-width:1200px;margin:0 auto") as main:
