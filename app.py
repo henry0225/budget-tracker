@@ -9,7 +9,9 @@ import io
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-from nicegui import ui
+import asyncio
+
+from nicegui import run, ui
 
 from parser import parse_csv, prepare_transactions
 from categorizer import CATEGORIES, categorize_transactions
@@ -138,7 +140,7 @@ def _cat_badge(category: str) -> str:
 async def _handle_upload(e: ui.upload.UploadEventArguments):
     global raw_df, categorized_df
     try:
-        raw_df = parse_csv(io.BytesIO(e.content.read()))
+        raw_df = parse_csv(io.BytesIO(await e.file.read()))
         categorized_df = None
         e.sender.reset()
         _render()
@@ -155,15 +157,21 @@ async def _handle_categorize():
 
     progress_label.set_content('<div class="sidebar-status">Categorizing…</div>')
     progress_bar.props("indeterminate")
+    loop = asyncio.get_event_loop()
     try:
         prepared = prepare_transactions(raw_df)
 
         def on_progress(done: int, total: int):
-            progress_label.set_content(f'<div class="sidebar-status">{done}/{total} merchants</div>')
-            progress_bar.props.remove("indeterminate")
-            progress_bar.props(f"value={done/total*100}")
+            loop.call_soon_threadsafe(
+                progress_label.set_content,
+                f'<div class="sidebar-status">{done}/{total} merchants</div>',
+            )
+            loop.call_soon_threadsafe(lambda: progress_bar.props(remove="indeterminate"))
+            loop.call_soon_threadsafe(lambda: progress_bar.props(f"value={done/total}"))
 
-        categorized_df = categorize_transactions(prepared, _api_key, on_progress=on_progress)
+        categorized_df = await run.io_bound(
+            categorize_transactions, prepared, _api_key, on_progress=on_progress
+        )
         progress_label.set_content(f'<div class="sidebar-status">Done — {len(categorized_df):,} transactions</div>')
         _render()
     except Exception as ex:
@@ -295,7 +303,7 @@ def _render_transactions(pos: pd.DataFrame):
         {"name": "Merchant", "label": "Merchant", "field": "Merchant", "align": "left", "sortable": True},
         {"name": "Description", "label": "Description", "field": "Description", "align": "left"},
         {"name": "Amount", "label": "Amount", "field": "Amount", "align": "right", "sortable": True, ":format": "value => '$' + value.toFixed(2)"},
-        {"name": "Category", "label": "Category", "field": "Category", "align": "left", "sortable": True, ":format": f"value => `{_cat_badge('$' + '{value}')}`"},
+        {"name": "Category", "label": "Category", "field": "Category", "align": "left", "sortable": True},
     ]
 
     table = ui.table(
@@ -303,6 +311,20 @@ def _render_transactions(pos: pd.DataFrame):
         rows=rows_all.to_dict("records"),
         pagination={"rowsPerPage": 25, "sortBy": "Date", "descending": True},
     ).classes("w-full")
+
+    _CAT_COLORS_JS = str(_CAT_COLORS).replace("'", '"')
+    table.add_slot('body-cell-Category', f'''
+        <q-td :props="props">
+            <span style="display:inline-flex;align-items:center;gap:.4rem;font-size:.8rem;color:#d4d4d8">
+                <span :style="{{
+                    background: {_CAT_COLORS_JS}[props.value] || '#71717a',
+                    width: '7px', height: '7px', borderRadius: '50%',
+                    display: 'inline-block', flexShrink: '0'
+                }}"></span>
+                {{{{ props.value }}}}
+            </span>
+        </q-td>
+    ''')
 
     def _filter():
         rows = rows_all.copy()
@@ -354,7 +376,7 @@ def _render_insights(pos: pd.DataFrame):
         cards.append(("📅", "Busiest day", f"{daily.idxmax()} — {_fmt_dollar(daily.max())}"))
 
         largest = pos.loc[pos["Amount"].idxmax()]
-        cards.append(("🏆", "Largest purchase", f"{largest['Merchant']} — {_fmt_dollar(largest['Amount'])} on {largest['Date'].strftime('%b %d, %Y')}"))
+        cards.append(("🏆", "Largest purchase", f"{largest['Merchant']} — {_fmt_dollar(largest['Amount'])} on {pd.to_datetime(largest['Date']).strftime('%b %d, %Y')}"))
 
         days = (pd.to_datetime(pos["Date"]).max() - pd.to_datetime(pos["Date"]).min()).days or 1
         cards.append(("💸", "Daily average", f"{_fmt_dollar(pos['Amount'].sum() / days)}/day"))
@@ -388,6 +410,7 @@ def _build():
     ui.add_css("""
         /* ── Reset & base ── */
         * { font-family: 'Inter', system-ui, -apple-system, sans-serif !important; }
+        .q-icon, .material-icons, .material-icons-outlined, .material-icons-round { font-family: 'Material Icons' !important; }
         body { background: #09090b !important; -webkit-font-smoothing: antialiased; }
 
         /* ── Header ── */
@@ -401,7 +424,7 @@ def _build():
         }
         .sidebar-hint { font-size: .7rem; color: #52525b; margin-top: .4rem; line-height: 1.4; }
         .sidebar-status { font-size: .75rem; color: #a1a1aa; line-height: 1.4; }
-        .sidebar-footer { font-size: .7rem; color: #3f3f46; line-height: 1.5; }
+        .sidebar-footer { font-size: .7rem; color: #52525b; line-height: 1.5; }
         .q-drawer .q-uploader {
             background: #18181b !important; border: 1px dashed #3f3f46 !important;
             border-radius: 10px !important; box-shadow: none !important;
@@ -530,7 +553,7 @@ def _build():
             # Section: status
             ui.html('<div style="height:1px;background:#27272a;margin:.25rem 0"></div>')
             progress_label = ui.html('<div class="sidebar-status"></div>')
-            progress_bar = ui.linear_progress(value=0, size="4px").classes("w-full")
+            progress_bar = ui.linear_progress(value=0, size="12px", show_value=False).classes("w-full")
 
             ui.space()
             ui.html('<div class="sidebar-footer">DeepSeek V4 · NiceGUI · Plotly</div>')

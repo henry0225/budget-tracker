@@ -1,11 +1,11 @@
 """
-Parser for Robinhood credit card transaction CSV exports.
+Parser for credit card transaction CSV exports.
+Supports Robinhood and Capital One formats.
 """
 
 from __future__ import annotations
 
 import re
-from datetime import datetime
 from typing import Any
 
 import pandas as pd
@@ -14,7 +14,6 @@ import pandas as pd
 # Constants
 # ---------------------------------------------------------------------------
 
-# US state codes + common country codes for trailing location stripping
 _STATE_CODES: set[str] = {
     "TX", "CA", "NY", "FL", "NV", "UT", "WA", "IL", "PA", "OH",
     "GA", "NC", "MI", "NJ", "VA", "AZ", "MA", "TN", "IN", "MO",
@@ -25,12 +24,21 @@ _STATE_CODES: set[str] = {
 }
 _STATE_ALT = "|".join(sorted(_STATE_CODES, key=len, reverse=True))
 
-# Payment-processor / platform prefixes to strip
+# Payment-processor / platform prefixes to strip (Robinhood + Capital One)
 _NOISE_PREFIX_RE = re.compile(
-    r"^(?:TST\*?|SQ\s?\*|PY\s?\*|UEP\*?|SNACK\*?|PAR\*?|"
-    r"SUMUP\s?\*|EB\s?\*|CPI\*?|CTLP\*?|"
-    r"AMAZON\s+(?:MKTPL|RETA)\*?|LYFT\s?\*|UBER\s?\*|"
-    r"FUNNEL\*?|OPENAI\s?\*)\s*",
+    r"^(?:"
+    # Square, Toast, Shopify, SumUp — common small-business POS systems
+    r"SQ\s*\*|TST\*?|SP\s*\*|SUMUP\s*\*|"
+    # PayPal, Stripe, Digital River — general payment processors
+    r"PAYPAL\s*\*?|STRIPE\s*\*|DRI\*?|"
+    # Misc POS / platform prefixes seen in the wild
+    r"PY\s*\*|UEP\*?|SNACK\*?|PAR\*?|EB\s*\*|CPI\*?|CTLP\*?|FUNNEL\*?|"
+    # Major merchants that embed their own prefix in descriptions
+    r"AMAZON\s+(?:MKTPL|RETA)\*?|AMZN\*?|LYFT\s*\*|UBER\s*\*|OPENAI\s*\*|"
+    # Chinese mobile payment platforms (AliPay, WeChat Pay)
+    r"WEIXIN\*?|ALP\*?"
+    r")\s*",
+    re.IGNORECASE,
 )
 
 # Trailing "CITY ST" patterns
@@ -38,48 +46,58 @@ _TRAILING_LOCATION_RE = re.compile(
     rf"\s+[A-Z][A-Za-z]*\s+(?:{_STATE_ALT})\s*$"
 )
 
-# Domain-like suffixes (e.g. " WWW.AMAZON.COWA", " LYFT.COM CA")
+# Domain-like suffixes
 _DOMAIN_RE = re.compile(r"\s+\S+\.(?:com|org|net|gov|edu|io|co|jp)\S*", re.IGNORECASE)
 
 # Cryptic order codes (all caps + digits, no meaningful words)
 _ORDER_CODE_RE = re.compile(r"^[A-Z0-9]{6,}$")
+
+# Trailing order code appended after a space (e.g. "Spotify P3DCEA9B48")
+_TRAILING_CODE_RE = re.compile(r"\s+[A-Z0-9]{6,}\s*$")
+
+
+# ---------------------------------------------------------------------------
+# Format detection
+# ---------------------------------------------------------------------------
+
+def _detect_format(df: pd.DataFrame) -> str:
+    cols = set(df.columns)
+    if {"Transaction Date", "Posted Date", "Debit"}.issubset(cols):
+        return "capital_one"
+    if {"Status", "Type", "Merchant"}.issubset(cols):
+        return "robinhood"
+    raise ValueError(
+        "Unrecognized CSV format. "
+        "Supported formats: Robinhood credit card, Capital One credit card."
+    )
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
-
 def parse_csv(source: str | Any) -> pd.DataFrame:
-    """Read a Robinhood credit card CSV export.
+    """Read a credit card CSV export and return a normalized DataFrame.
 
-    Returns a DataFrame with all original columns; ``Date`` is parsed as
-    datetime, ``Amount`` as float.
+    Auto-detects Robinhood and Capital One formats. The returned DataFrame
+    always has: Date (datetime), Time (str), Amount (float), Merchant (str),
+    Description (str), Status (str), Type (str).
     """
-    df = pd.read_csv(
-        source,
-        dtype={
-            "Cardholder": str,
-            "Merchant": str,
-            "Description": str,
-            "Status": str,
-            "Type": str,
-        },
-        keep_default_na=False,
-    )
-    df["Date"] = pd.to_datetime(df["Date"], format="%Y-%m-%d", errors="coerce")
-    df["Amount"] = pd.to_numeric(df["Amount"], errors="coerce")
-    return df
+    df = pd.read_csv(source, keep_default_na=False)
+    fmt = _detect_format(df)
+    if fmt == "capital_one":
+        return _normalize_capital_one(df)
+    return _normalize_robinhood(df)
 
 
 def prepare_transactions(df: pd.DataFrame) -> pd.DataFrame:
     """Filter to posted purchases and add derived columns.
 
     Returns a DataFrame with columns:
-    ``Date``, ``Time``, ``Amount``, ``Merchant``, ``Description``,
-    ``Month``, ``ParsedDescription`` — sorted by Date descending.
+    Date, Time, Amount, Merchant, Description, Month, ParsedDescription
+    — sorted by Date descending.
     """
-    mask = (df["Type"] == "Purchase") & (df["Status"] == "Posted") & (df["Amount"] > 0)
+    mask = (df["Status"] == "Posted") & (df["Type"] == "Purchase") & (df["Amount"] > 0)
     out = df.loc[mask].copy()
 
     out["Month"] = out["Date"].dt.strftime("%Y-%m")
@@ -88,7 +106,6 @@ def prepare_transactions(df: pd.DataFrame) -> pd.DataFrame:
         for m, d in zip(out["Merchant"], out["Description"])
     ]
     out = out.sort_values("Date", ascending=False).reset_index(drop=True)
-
     return out[["Date", "Time", "Amount", "Merchant", "Description", "Month", "ParsedDescription"]]
 
 
@@ -127,9 +144,44 @@ def get_summary_stats(df: pd.DataFrame) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Internal helpers
+# Format normalizers
 # ---------------------------------------------------------------------------
 
+def _normalize_robinhood(df: pd.DataFrame) -> pd.DataFrame:
+    for col in ["Cardholder", "Merchant", "Description", "Status", "Type", "Time"]:
+        if col not in df.columns:
+            df[col] = ""
+    df["Date"] = pd.to_datetime(df["Date"], format="%Y-%m-%d", errors="coerce")
+    df["Amount"] = pd.to_numeric(df["Amount"], errors="coerce")
+    return df
+
+
+def _normalize_capital_one(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.rename(columns={"Transaction Date": "Date"})
+    df["Date"] = pd.to_datetime(df["Date"], format="%Y-%m-%d", errors="coerce")
+    df["Debit"] = pd.to_numeric(df["Debit"], errors="coerce").fillna(0)
+    df["Amount"] = df["Debit"]
+    # Strip payment-processor prefixes from the display merchant name
+    df["Merchant"] = (
+        df["Description"]
+        .str.replace(_NOISE_PREFIX_RE, "", regex=True)
+        .str.strip(" -.,*#")
+    )
+    # Fall back to original if cleaning wiped too much
+    too_short = df["Merchant"].str.len() < 3
+    df.loc[too_short, "Merchant"] = df.loc[too_short, "Description"]
+    df["Time"] = ""
+    df["Status"] = "Posted"
+    # Mark payment/credit rows so prepare_transactions filters them out
+    is_payment = (df["Amount"] == 0) | (df["Category"] == "Payment/Credit")
+    df["Type"] = "Purchase"
+    df.loc[is_payment, "Type"] = "Payment"
+    return df
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
 
 def _clean_description(merchant: str, description: str) -> str:
     """Clean a transaction description for downstream categorization."""
@@ -147,10 +199,13 @@ def _clean_description(merchant: str, description: str) -> str:
     # 3. Strip domain references
     desc = _DOMAIN_RE.sub("", desc)
 
-    # 4. Collapse whitespace
+    # 4. Strip trailing order codes ("Spotify P3DCEA9B48" → "Spotify")
+    desc = _TRAILING_CODE_RE.sub("", desc)
+
+    # 5. Collapse whitespace
     desc = re.sub(r"\s+", " ", desc).strip(" -.,*#")
 
-    # 5. Fall back to merchant if the result is a cryptic order code or empty
+    # 6. Fall back to merchant if the result is a cryptic order code or empty
     if not desc or len(desc) < 2 or _ORDER_CODE_RE.match(desc):
         desc = merchant
 
