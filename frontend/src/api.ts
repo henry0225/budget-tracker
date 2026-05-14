@@ -11,6 +11,21 @@ export async function uploadCSV(file: File): Promise<UploadResponse> {
   return res.json() as Promise<UploadResponse>
 }
 
+export async function uploadP2PCSV(
+  file: File,
+  sessionId?: string,
+): Promise<UploadResponse> {
+  const body = new FormData()
+  body.append('file', file)
+  if (sessionId) body.append('session_id', sessionId)
+  const res = await fetch('/api/upload-p2p', { method: 'POST', body })
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({})) as { detail?: string }
+    throw new Error(err.detail ?? `Upload failed (${res.status})`)
+  }
+  return res.json() as Promise<UploadResponse>
+}
+
 export interface StreamHandlers {
   onProgress: (done: number, total: number) => void
   onDone: () => void
@@ -22,7 +37,9 @@ export function streamCategorize(
   apiKey: string,
   handlers: StreamHandlers,
 ): EventSource {
-  const url = `/api/categorize/${encodeURIComponent(sessionId)}?api_key=${encodeURIComponent(apiKey)}`
+  const params = new URLSearchParams()
+  if (apiKey) params.set('api_key', apiKey)
+  const url = `/api/categorize/${encodeURIComponent(sessionId)}?${params}`
   const es = new EventSource(url)
 
   es.onmessage = (e: MessageEvent<string>) => {

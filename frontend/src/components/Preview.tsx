@@ -9,12 +9,16 @@ export function Preview({ data }: Props) {
   const remaining = data.transaction_count - data.preview.length
   const showDescription = data.preview.some((tx) => tx.description !== tx.merchant)
 
+  const parts: string[] = []
+  if (data.cc_count > 0) parts.push(`${data.cc_count.toLocaleString()} card purchases`)
+  if (data.p2p_count > 0) parts.push(`${data.p2p_count.toLocaleString()} Venmo/Zelle sent`)
+
   return (
     <div className="p-8">
       <h2 className="text-lg font-semibold tracking-tight">Transaction Preview</h2>
       <p className="mt-1 text-sm text-zinc-500">
-        {data.transaction_count.toLocaleString()} transactions ·{' '}
-        {data.merchant_count} unique merchants
+        {parts.length ? parts.join(' · ') : `${data.transaction_count.toLocaleString()} transactions`}
+        {' '}· {data.merchant_count} unique merchants
       </p>
 
       <div className="mt-6 overflow-hidden rounded-xl border border-zinc-800">

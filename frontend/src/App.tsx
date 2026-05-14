@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react'
-import { getDashboard, mergeCSVs, streamCategorize, uploadCSV } from './api'
+import { getDashboard, mergeCSVs, streamCategorize, uploadCSV, uploadP2PCSV } from './api'
 import { Sidebar } from './components/Sidebar'
 import { Landing } from './components/Landing'
 import { Preview } from './components/Preview'
@@ -18,28 +18,57 @@ export default function App() {
 
   const esRef = useRef<EventSource | null>(null)
 
+  const hasCC = uploadedFiles.some((f) => f.kind === 'cc')
+  const hasP2P = uploadedFiles.some((f) => f.kind === 'p2p')
+  const onlyP2P = hasP2P && !hasCC
+
   async function handleUpload(file: File) {
     setError(null)
     setDashboardData(null)
     setProgress(null)
     try {
       const data = await uploadCSV(file)
-      const newFiles = [
-        ...uploadedFiles,
-        { name: file.name, sessionId: data.session_id, count: data.transaction_count },
-      ]
-      setUploadedFiles(newFiles)
-
-      if (newFiles.length > 1) {
-        const merged = await mergeCSVs(newFiles.map((f) => f.sessionId))
-        setPreviewData(merged)
-      } else {
-        setPreviewData(data)
-      }
-      setView('preview')
+      await mergeAfterUpload(file.name, data, 'cc')
     } catch (e) {
       setError((e as Error).message)
     }
+  }
+
+  async function handleP2PUpload(file: File) {
+    setError(null)
+    setDashboardData(null)
+    setProgress(null)
+    try {
+      const data = await uploadP2PCSV(file)
+      await mergeAfterUpload(file.name, data, 'p2p')
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+
+  // Each upload creates its own session; combine them via /merge so each file
+  // can be removed independently.
+  async function mergeAfterUpload(
+    name: string,
+    data: UploadResponse,
+    kind: 'cc' | 'p2p',
+  ) {
+    const newFile: UploadedFile = {
+      name,
+      sessionId: data.session_id,
+      count: kind === 'cc' ? data.cc_count : data.p2p_count,
+      kind,
+    }
+    const newFiles = [...uploadedFiles, newFile]
+    setUploadedFiles(newFiles)
+
+    if (newFiles.length === 1) {
+      setPreviewData(data)
+    } else {
+      const merged = await mergeCSVs(newFiles.map((f) => f.sessionId))
+      setPreviewData(merged)
+    }
+    setView('preview')
   }
 
   async function handleRemoveFile(sessionId: string) {
@@ -62,7 +91,8 @@ export default function App() {
 
   function handleCategorize() {
     const activeSessionId = previewData?.session_id
-    if (!activeSessionId || !apiKey || isCategorizing) return
+    if (!activeSessionId || isCategorizing) return
+    if (hasCC && !apiKey) return
     esRef.current?.close()
     setIsCategorizing(true)
     setProgress(null)
@@ -100,18 +130,23 @@ export default function App() {
     setError(null)
   }
 
+  const canCategorize =
+    uploadedFiles.length > 0 && !isCategorizing && (onlyP2P || !!apiKey)
+
   return (
     <div className="flex h-screen overflow-hidden bg-zinc-950 text-zinc-50">
       <Sidebar
         uploadedFiles={uploadedFiles}
         hasDashboard={view === 'dashboard'}
         apiKey={apiKey}
+        apiKeyRequired={hasCC}
         onApiKeyChange={setApiKey}
         onUpload={handleUpload}
+        onP2PUpload={handleP2PUpload}
         onCategorize={handleCategorize}
         onReset={handleReset}
         onRemoveFile={handleRemoveFile}
-        canCategorize={uploadedFiles.length > 0 && !!apiKey && !isCategorizing}
+        canCategorize={canCategorize}
         isCategorizing={isCategorizing}
         progress={progress}
         error={error}

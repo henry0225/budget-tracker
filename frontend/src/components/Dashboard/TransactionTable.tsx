@@ -186,7 +186,12 @@ export function TransactionTable({ transactions }: Props) {
                         <span className="text-zinc-300">{tx.category}</span>
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-right tabular-nums">
+                    <td
+                      className={clsx(
+                        'px-4 py-3 text-right tabular-nums',
+                        tx.amount < 0 && 'text-emerald-400',
+                      )}
+                    >
                       {fmtCurrency(tx.amount)}
                     </td>
                   </tr>

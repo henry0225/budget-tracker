@@ -1,7 +1,18 @@
-import { Calendar, CreditCard, Repeat, Tag, TrendingDown, TrendingUp, type LucideIcon } from 'lucide-react'
+import {
+  ArrowDownLeft,
+  ArrowUpRight,
+  ArrowLeftRight,
+  Calendar,
+  CreditCard,
+  Repeat,
+  Tag,
+  TrendingDown,
+  TrendingUp,
+  type LucideIcon,
+} from 'lucide-react'
 import { catColor } from '../../constants'
 import { fmtCurrency, fmtDollar } from '../../lib/format'
-import type { InsightItem } from '../../types'
+import type { InsightItem, P2PSummary } from '../../types'
 
 // ── Shared primitives ──────────────────────────────────────────────────────────
 
@@ -197,12 +208,139 @@ function RecurringCard({ title, data }: InsightItem) {
   )
 }
 
+function P2PCard({ title, data }: InsightItem) {
+  const d = data as unknown as P2PSummary
+  const net = d.sent_total - d.received_total
+
+  return (
+    <CardShell wide>
+      <CardHeader Icon={ArrowLeftRight} title={title} />
+
+      {/* Headline numbers */}
+      <div className="grid grid-cols-3 gap-4 border-b border-zinc-800 pb-4">
+        <div>
+          <p className="text-[10px] uppercase tracking-wider text-zinc-600">Sent</p>
+          <p className="mt-1 text-xl font-semibold text-red-400 tabular-nums">
+            {fmtCurrency(d.sent_total)}
+          </p>
+          <p className="text-[10px] text-zinc-600">{d.sent_count} transactions</p>
+        </div>
+        <div>
+          <p className="text-[10px] uppercase tracking-wider text-zinc-600">
+            Received <span className="text-zinc-700">(auto-subtracted)</span>
+          </p>
+          <p className="mt-1 text-xl font-semibold text-emerald-400 tabular-nums">
+            −{fmtCurrency(d.received_total)}
+          </p>
+          <p className="text-[10px] text-zinc-600">{d.received_count} transactions</p>
+        </div>
+        <div>
+          <p className="text-[10px] uppercase tracking-wider text-zinc-600">
+            Net = category total
+          </p>
+          <p
+            className={`mt-1 text-xl font-semibold tabular-nums ${
+              net >= 0 ? 'text-zinc-100' : 'text-emerald-400'
+            }`}
+          >
+            {net >= 0 ? '' : '−'}
+            {fmtCurrency(Math.abs(net))}
+          </p>
+          <p className="text-[10px] text-zinc-600">Counted in total spending</p>
+        </div>
+      </div>
+
+      {/* Service split */}
+      {d.by_service.length > 0 && (
+        <div className="mt-4 space-y-2">
+          {d.by_service.map((s) => (
+            <div key={s.service} className="flex items-center gap-3 text-xs">
+              <span className="w-12 shrink-0 text-zinc-400">{s.service}</span>
+              <span className="flex flex-1 items-center gap-3 text-zinc-500">
+                <span>
+                  <ArrowUpRight className="mr-0.5 inline h-3 w-3 text-red-400" />
+                  <span className="tabular-nums text-zinc-300">{fmtCurrency(s.sent)}</span> sent
+                </span>
+                <span>
+                  <ArrowDownLeft className="mr-0.5 inline h-3 w-3 text-emerald-400" />
+                  <span className="tabular-nums text-zinc-300">{fmtCurrency(s.received)}</span> received
+                </span>
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Top counterparties */}
+      <div className="mt-5 grid grid-cols-1 gap-5 sm:grid-cols-2">
+        <CounterpartySection title="Most sent to" parties={d.top_sent} color="#f87171" />
+        <CounterpartySection
+          title="Most received from"
+          parties={d.top_received}
+          color="#34d399"
+        />
+      </div>
+
+      <p className="mt-4 border-t border-zinc-800 pt-3 text-[10px] leading-relaxed text-zinc-600">
+        The <span className="text-zinc-400">Venmo &amp; Zelle</span> category is net
+        spending: every received P2P is automatically subtracted, so your total
+        spending reflects what actually left your accounts.
+      </p>
+    </CardShell>
+  )
+}
+
+function CounterpartySection({
+  title,
+  parties,
+  color,
+}: {
+  title: string
+  parties: P2PSummary['top_sent']
+  color: string
+}) {
+  if (parties.length === 0) {
+    return (
+      <div>
+        <p className="mb-2 text-[10px] uppercase tracking-wider text-zinc-600">{title}</p>
+        <p className="text-xs text-zinc-600">None.</p>
+      </div>
+    )
+  }
+  const max = parties[0].amount
+  return (
+    <div>
+      <p className="mb-2 text-[10px] uppercase tracking-wider text-zinc-600">{title}</p>
+      <div className="space-y-1.5">
+        {parties.slice(0, 6).map((p) => (
+          <div key={p.name}>
+            <div className="flex items-center justify-between gap-2 text-xs">
+              <span className="min-w-0 truncate text-zinc-300">{p.name}</span>
+              <span className="shrink-0 tabular-nums text-zinc-500">
+                {fmtCurrency(p.amount)}
+              </span>
+            </div>
+            <div className="mt-0.5 h-1 overflow-hidden rounded-full bg-zinc-800/60">
+              <div
+                className="h-full rounded-full"
+                style={{ width: `${(p.amount / max) * 100}%`, background: color, opacity: 0.75 }}
+              />
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 // ── Dispatch ───────────────────────────────────────────────────────────────────
 
 function InsightCard(insight: InsightItem) {
   switch (insight.type) {
     case 'top_category':
       return <TopCategoryCard {...insight} />
+    case 'p2p_summary':
+      return <P2PCard {...insight} />
     case 'day_of_week':
       return <DayOfWeekCard {...insight} />
     case 'largest_purchase':
