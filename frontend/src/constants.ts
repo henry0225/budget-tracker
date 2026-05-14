@@ -7,6 +7,7 @@ export const CAT_COLORS: Record<string, string> = {
   'Subscriptions & Services': '#f472b6',
   Entertainment: '#22d3ee',
   'Fees & Charges': '#a3e635',
+  'Venmo & Zelle': '#fb923c',
   Uncategorized: '#71717a',
 }
 

@@ -9,8 +9,12 @@ export interface Transaction {
 export interface UploadResponse {
   session_id: string
   transaction_count: number
+  cc_count: number
+  p2p_count: number
   merchant_count: number
   preview: Transaction[]
+  kind?: 'cc' | 'p2p'
+  p2p_summary?: P2PSummary
 }
 
 export interface CategoryTotal {
@@ -40,6 +44,7 @@ export interface UploadedFile {
   name: string
   sessionId: string
   count: number
+  kind: 'cc' | 'p2p'
 }
 
 export interface DashboardData {
@@ -51,3 +56,27 @@ export interface DashboardData {
 }
 
 export type AppView = 'landing' | 'preview' | 'dashboard'
+
+// ── Venmo/Zelle insight data (matches backend summarize_p2p) ───────────────
+
+export interface P2PCounterparty {
+  name: string
+  amount: number
+  count: number
+}
+
+export interface P2PServiceSplit {
+  service: 'Venmo' | 'Zelle'
+  sent: number
+  received: number
+}
+
+export interface P2PSummary {
+  sent_total: number
+  received_total: number
+  sent_count: number
+  received_count: number
+  by_service: P2PServiceSplit[]
+  top_sent: P2PCounterparty[]
+  top_received: P2PCounterparty[]
+}

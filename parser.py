@@ -1,6 +1,9 @@
 """
 Parser for credit card transaction CSV exports.
 Supports Robinhood and Capital One formats.
+
+Also extracts Venmo/Zelle activity from Capital One 360 Checking exports
+(a different schema than the credit card format).
 """
 
 from __future__ import annotations
@@ -203,3 +206,166 @@ def _clean_description(merchant: str, description: str) -> str:
         desc = merchant
 
     return desc
+
+
+# ---------------------------------------------------------------------------
+# Capital One 360 Checking — Venmo/Zelle extraction
+# ---------------------------------------------------------------------------
+
+_ZELLE_SENT_RE = re.compile(r"^\s*Zelle\s+money\s+sent\s+to\s+(.+?)\s*$", re.IGNORECASE)
+_ZELLE_RECEIVED_RE = re.compile(r"^\s*Zelle\s+money\s+received\s+from\s+(.+?)\s*$", re.IGNORECASE)
+_VENMO_CASHOUT_RE = re.compile(r"VENMO\s+CASHOUT", re.IGNORECASE)
+_VENMO_PAYMENT_RE = re.compile(r"VENMO\s+PAYMENT", re.IGNORECASE)
+
+_CHECKING_REQUIRED_COLS = {
+    "Transaction Description",
+    "Transaction Date",
+    "Transaction Type",
+    "Transaction Amount",
+}
+
+
+def parse_p2p_csv(source) -> pd.DataFrame:
+    """Parse a Capital One 360 Checking CSV and keep only Venmo/Zelle rows.
+
+    Returns a DataFrame with columns:
+    Date (datetime), Service, Direction, Counterparty, Amount (float), Description.
+    Sorted by Date descending.
+    """
+    df = pd.read_csv(source, keep_default_na=False)
+    if not _CHECKING_REQUIRED_COLS.issubset(df.columns):
+        raise ValueError(
+            "Unrecognized checking CSV format. Expected a Capital One 360 "
+            "Checking export with columns: Transaction Description, "
+            "Transaction Date, Transaction Type, Transaction Amount."
+        )
+
+    df = df.rename(
+        columns={
+            "Transaction Description": "Description",
+            "Transaction Date": "Date",
+            "Transaction Type": "Type",
+            "Transaction Amount": "Amount",
+        }
+    )
+    df["Date"] = pd.to_datetime(df["Date"], format="%m/%d/%y", errors="coerce")
+    df["Amount"] = pd.to_numeric(df["Amount"], errors="coerce")
+
+    parsed = df["Description"].apply(_parse_p2p_description)
+    df["Service"] = [p[0] if p else None for p in parsed]
+    df["Direction"] = [p[1] if p else None for p in parsed]
+    df["Counterparty"] = [p[2] if p else None for p in parsed]
+
+    # Cross-check direction against the bank's debit/credit flag.
+    # Debit = money out of checking (sent); Credit = money in (received).
+    bank_dir = df["Type"].str.lower().map({"debit": "sent", "credit": "received"})
+    df["Direction"] = df["Direction"].where(df["Direction"].notna(), bank_dir)
+
+    out = df[df["Service"].notna() & df["Date"].notna() & df["Amount"].notna()].copy()
+    out = out.sort_values("Date", ascending=False).reset_index(drop=True)
+    return out[["Date", "Service", "Direction", "Counterparty", "Amount", "Description"]]
+
+
+def _parse_p2p_description(desc: str) -> tuple[str, str, str] | None:
+    """Return (service, direction, counterparty) or None if not Venmo/Zelle."""
+    if not desc:
+        return None
+
+    m = _ZELLE_SENT_RE.match(desc)
+    if m:
+        return ("Zelle", "sent", _normalize_name(m.group(1)))
+    m = _ZELLE_RECEIVED_RE.match(desc)
+    if m:
+        return ("Zelle", "received", _normalize_name(m.group(1)))
+    if _VENMO_CASHOUT_RE.search(desc):
+        return ("Venmo", "received", "Venmo (cashout to bank)")
+    if _VENMO_PAYMENT_RE.search(desc):
+        return ("Venmo", "sent", "Venmo (payment from bank)")
+    return None
+
+
+def _normalize_name(name: str) -> str:
+    """Title-case all-caps names; preserve mixed-case and numeric strings."""
+    name = name.strip(" -.,")
+    if not name or any(c.islower() for c in name):
+        return name
+    return name.title()
+
+
+def prepare_p2p_for_dashboard(df_p2p: pd.DataFrame) -> pd.DataFrame:
+    """Convert P2P parser output into the standard transaction schema.
+
+    Both directions are returned with the same category ``Venmo & Zelle``.
+    Sent rows keep their amount as-is; received rows are *negated*, so when
+    the dashboard sums the category it gets the true net spend (sent minus
+    received) instead of double-counting reimbursements as inflow.
+
+    The counterparty is used as the Merchant so people / businesses appear
+    in the dashboard's transaction table just like any other purchase.
+    """
+    cols = ["Date", "Time", "Amount", "Merchant", "Description", "Month", "ParsedDescription", "Category"]
+    if df_p2p.empty:
+        return df_p2p.assign(
+            Time="", Month="", ParsedDescription="", Category="Venmo & Zelle", Merchant="",
+        )[cols]
+
+    out = df_p2p.copy()
+    out["Merchant"] = out["Counterparty"]
+    out["Time"] = ""
+    out["Month"] = out["Date"].dt.strftime("%Y-%m")
+    out["ParsedDescription"] = out["Description"]
+    out["Category"] = "Venmo & Zelle"
+    # Received rows are inflow — store as a negative spending amount so the
+    # category sum nets them out automatically.
+    received_mask = out["Direction"] == "received"
+    out.loc[received_mask, "Amount"] = -out.loc[received_mask, "Amount"].abs()
+
+    out = out.sort_values("Date", ascending=False).reset_index(drop=True)
+    return out[cols]
+
+
+def summarize_p2p(df_p2p: pd.DataFrame) -> dict:
+    """Compute a P2P summary (sent/received totals, by-counterparty, etc.).
+
+    Used to build the dashboard's "Venmo & Zelle activity" insight card.
+    """
+    if df_p2p.empty:
+        return {}
+
+    sent = df_p2p[df_p2p["Direction"] == "sent"]
+    received = df_p2p[df_p2p["Direction"] == "received"]
+
+    def _by_party(frame: pd.DataFrame) -> list[dict]:
+        if frame.empty:
+            return []
+        agg = (
+            frame.groupby("Counterparty")["Amount"]
+            .agg(["sum", "count"])
+            .sort_values("sum", ascending=False)
+            .reset_index()
+        )
+        return [
+            {"name": str(r["Counterparty"]), "amount": float(r["sum"]), "count": int(r["count"])}
+            for _, r in agg.iterrows()
+        ]
+
+    by_service = []
+    for svc in ["Venmo", "Zelle"]:
+        s = df_p2p[df_p2p["Service"] == svc]
+        if s.empty:
+            continue
+        by_service.append({
+            "service": svc,
+            "sent": float(s[s["Direction"] == "sent"]["Amount"].sum()),
+            "received": float(s[s["Direction"] == "received"]["Amount"].sum()),
+        })
+
+    return {
+        "sent_total": float(sent["Amount"].sum()),
+        "received_total": float(received["Amount"].sum()),
+        "sent_count": int(len(sent)),
+        "received_count": int(len(received)),
+        "by_service": by_service,
+        "top_sent": _by_party(sent)[:8],
+        "top_received": _by_party(received)[:8],
+    }
